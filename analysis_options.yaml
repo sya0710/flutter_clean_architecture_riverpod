@@ -1,0 +1,20 @@
+include: package:very_good_analysis/analysis_options.yaml
+analyzer:
+  exclude:
+    - lib/core/config/lang/l10n/gen*
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "**/*.gen.dart"
+linter:
+  rules:
+    public_member_api_docs: false
+    # ⚠️ Disable rules that may cause false positives with Retrofit/Freezed.
+    prefer_constructors_over_static_methods: false
+    avoid_classes_with_only_static_members: false
+    avoid_positional_boolean_parameters: false
+    # ✅ Keep the rules that are beneficial to the project.
+    always_use_package_imports: true
+    avoid_print: true
+    prefer_final_locals: true
+    sort_constructors_first: true
+    type_annotate_public_apis: true
