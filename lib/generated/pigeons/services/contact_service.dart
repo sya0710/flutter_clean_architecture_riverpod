@@ -1,16 +1,20 @@
-import 'package:flutter/services.dart';
+import 'package:riverpodlive/core/error/platform_call_exception.dart';
+import 'package:riverpodlive/core/helpers/network_utils.dart';
 import 'package:riverpodlive/generated/pigeons/api/contact_api.g.dart';
 
 class ContactService {
   final ContactApi _api = ContactApi();
 
+  /// Fetches all contacts from the device via the native platform.
+  ///
+  /// Throws a [PlatformCallException] on any platform-channel error, with
+  /// [PlatformCallException.errorCode] set to one of:
+  /// - [PlatformCallErrorCode.permissionDenied] – contacts permission
+  /// not granted.
+  /// - [PlatformCallErrorCode.channelError]     – native channel unavailable.
+  /// - [PlatformCallErrorCode.timeout]          – call timed out after retries.
+  /// - [PlatformCallErrorCode.unknown]          – any other native error.
   Future<List<Contact>> getContactsFromDevice() async {
-    try {
-      return _api.getContacts();
-    } on ContactError catch (e) {
-      throw Exception('Error ${e.code}: ${e.message}');
-    } on PlatformException catch (e) {
-      throw Exception('Platform error: ${e.message}');
-    }
+    return NetworkUtils.withTimeoutAndRetry(_api.getContacts);
   }
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:riverpodlive/core/di/providers/log_management_provider.dart';
+import 'package:riverpodlive/core/error/platform_call_exception.dart';
 import 'package:riverpodlive/core/extensions/result_extension.dart';
 import 'package:riverpodlive/features/contacts/data/datasources/local/contact_local_provider.dart';
 import 'package:riverpodlive/features/contacts/data/datasources/remotes/contact_remote_provider.dart';
@@ -96,11 +97,23 @@ class ContactNotifier extends _$ContactNotifier {
               (contact) => 'Contact: ${contact.displayName}, ${contact.phones}',
             ).toList()}',
           );
-    } on Exception catch (e, st) {
+    } on PlatformCallException catch (e, st) {
+      // Map the typed platform error to a human-readable message.
+      final message = switch (e.errorCode) {
+        PlatformCallErrorCode.permissionDenied =>
+          'Contacts permission is required. Please enable it in Settings.',
+        PlatformCallErrorCode.channelError =>
+          'Could not connect to the native platform. Please restart the app.',
+        PlatformCallErrorCode.timeout => 'Request timed out. Please try again.',
+        PlatformCallErrorCode.nullError ||
+        PlatformCallErrorCode.unknown => e.message,
+      };
       state = AsyncError<ContactState>(
-        e,
+        Exception(message),
         st,
       );
+    } on Exception catch (e, st) {
+      state = AsyncError<ContactState>(e, st);
     }
   }
 }
