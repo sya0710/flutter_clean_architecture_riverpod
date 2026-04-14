@@ -88,7 +88,7 @@ class ContactNotifier extends _$ContactNotifier {
       final contactService = ContactService();
       // All contacts from device will be inserted/updated to local database,
       // then get all contacts from local database to display
-      final contacts = await contactService.getContactsFromDevice();
+      final contacts = await contactService.getContactsFromDevice(ref);
       await ref
           .read(logManagementProvider)
           .log(
@@ -97,20 +97,12 @@ class ContactNotifier extends _$ContactNotifier {
               (contact) => 'Contact: ${contact.displayName}, ${contact.phones}',
             ).toList()}',
           );
-    } on PlatformCallException catch (e, st) {
-      // Map the typed platform error to a human-readable message.
-      final message = switch (e.errorCode) {
-        PlatformCallErrorCode.permissionDenied =>
-          'Contacts permission is required. Please enable it in Settings.',
-        PlatformCallErrorCode.channelError =>
-          'Could not connect to the native platform. Please restart the app.',
-        PlatformCallErrorCode.timeout => 'Request timed out. Please try again.',
-        PlatformCallErrorCode.nullError ||
-        PlatformCallErrorCode.unknown => e.message,
-      };
-      state = AsyncError<ContactState>(
-        Exception(message),
-        st,
+    } on PlatformCallException catch (_, _) {
+      state = const AsyncData<ContactState>(
+        ContactState(
+          updateDatabaseFinish: true,
+          apiResultMessage: '',
+        ),
       );
     } on Exception catch (e, st) {
       state = AsyncError<ContactState>(e, st);

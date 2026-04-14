@@ -7,18 +7,18 @@ extension PlatformExceptionMapper on PlatformException {
   /// Converts this [PlatformException] to a [PlatformCallException].
   ///
   /// The errorCode is classified based on the raw [code]:
-  /// - `PERMISSION_DENIED` → [PlatformCallErrorCode.permissionDenied]
-  /// - `channel-error`     → [PlatformCallErrorCode.channelError]
-  /// - `null-error`        → [PlatformCallErrorCode.nullError]
+  /// - `permissionDenied` → [PlatformCallErrorCode.permissionDenied]
+  /// - `channelError`     → [PlatformCallErrorCode.channelError]
+  /// - `nullError`        → [PlatformCallErrorCode.nullError]
   /// - anything else       → [PlatformCallErrorCode.unknown]
   ///
   /// A human-readable [PlatformCallException.message] is generated
   /// automatically when [message] is null.
   PlatformCallException toPlatformCallException() {
     final errorCode = switch (code) {
-      'PERMISSION_DENIED' => PlatformCallErrorCode.permissionDenied,
-      'channel-error' => PlatformCallErrorCode.channelError,
-      'null-error' => PlatformCallErrorCode.nullError,
+      'permissionDenied' => PlatformCallErrorCode.permissionDenied,
+      'channelError' => PlatformCallErrorCode.channelError,
+      'nullError' => PlatformCallErrorCode.nullError,
       _ => PlatformCallErrorCode.unknown,
     };
 

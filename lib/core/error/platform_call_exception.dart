@@ -46,7 +46,7 @@ class PlatformCallException implements Exception {
   final String? originalCode;
 
   /// Returns `true` for errors that should **not** be retried.
-  bool get isNonRetryable =>
+  bool get isNonRetriable =>
       errorCode == PlatformCallErrorCode.permissionDenied ||
       errorCode == PlatformCallErrorCode.channelError ||
       errorCode == PlatformCallErrorCode.nullError;

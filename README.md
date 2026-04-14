@@ -26,6 +26,7 @@ Designed for teams that want a scalable, production-ready foundation with clear 
 - [Running the App](#running-the-app)
 - [Building the App](#building-the-app)
 - [Platform Permissions](#platform-permissions)
+- [Global Platform Error Boundary](#global-platform-error-boundary)
 - [Notes](#notes)
 
 ---
@@ -84,9 +85,9 @@ lib/
 │   │   ├── bootstrap.dart      # App initialization + Riverpod root
 │   │   ├── http_overrides_impl.dart
 │   │   └── providers/          # Core Riverpod providers
-│   ├── error/                  # Result<T> sealed class + PlatformCallException
-│   ├── extensions/             # BuildContext, Result & PlatformException extensions
-│   ├── helpers/                # Utils (UUID, name format, permissions, retry)
+│   ├── error/                  # Result<T> sealed class + Pagination
+│   ├── extensions/             # BuildContext & Result extensions
+│   ├── helpers/                # Utils (UUID, name format, permissions)
 │   └── presentation/
 │       ├── pages/base_page.dart
 │       └── widgets/bottom_navigation_bar_widget.dart
@@ -338,26 +339,35 @@ Sealed `Result<T>` class (Freezed) – the universal return type for all reposit
 - `Result.fromJson()` – smart deserialization: infers success/error from JSON shape (checks for `data` key and `status` field)
 
 #### `lib/core/error/platform_call_exception.dart`
-Typed error model for platform-channel (Pigeon / Flutter method channel) failures.
+Typed exception wrapping raw platform-channel errors. Used across the entire **Pigeon / platform-call** error-handling pipeline.
 
-`PlatformCallErrorCode` enum – five well-known failure reasons:
+**`PlatformCallErrorCode` enum:**
 
-| Value | Raw platform code | Meaning |
-|---|---|---|
-| `permissionDenied` | `PERMISSION_DENIED` | User denied a required OS permission |
-| `channelError` | `channel-error` | Flutter ↔ native message channel unavailable |
-| `nullError` | `null-error` | Platform returned null for a non-null field |
-| `timeout` | *(timeout)* | Call exceeded the allowed time window |
-| `unknown` | anything else | Unclassified native error |
+| Code | Description |
+|---|---|
+| `permissionDenied` | User denied the required OS permission (e.g. Contacts) |
+| `channelError` | Flutter ↔ native message channel could not be established |
+| `nullError` | Platform returned null where a non-null value was expected |
+| `timeout` | Call did not complete within the allowed time window |
+| `unknown` | Any other, unclassified platform error |
 
-`PlatformCallException` class – implements `Exception`:
-- `errorCode` – the classified `PlatformCallErrorCode`
-- `message` – human-readable description (auto-generated when the platform provides none)
-- `originalCode` – the raw code string from the platform (useful for debugging; `null` for timeout)
-- `isNonRetryable` getter → `true` for `permissionDenied`, `channelError`, and `nullError` (retrying these is pointless)
-- `PlatformCallException.timeout()` – convenience factory for timeout errors
+**`PlatformCallException` class:**
 
-> Use the `PlatformExceptionMapper` extension (see below) to convert a raw `PlatformException` into a `PlatformCallException`.
+| Member | Description |
+|---|---|
+| `errorCode` | Classified `PlatformCallErrorCode` |
+| `message` | Human-readable description |
+| `originalCode` | Raw code string from the platform (nullable) |
+| `isNonRetriable` | `true` for `permissionDenied`, `channelError`, `nullError` — these must not be retried |
+| `PlatformCallException.timeout()` | Convenience factory for timeout errors |
+
+#### `lib/core/error/error_notifier.dart`
+Global Riverpod notifier (`errorProvider`) that acts as the **platform error bus**:
+- State: `PlatformCallException?` (null = no active error)
+- `notify(exception)` – sets the current error and optionally forwards to a remote logging service (Sentry / Crashlytics placeholder)
+- `clear()` – resets the error state to null after it has been consumed by the UI
+
+> Used by `NetworkUtils.withTimeoutAndRetry` to broadcast any platform error to listening UI widgets.
 
 #### `lib/core/extensions/context_extension.dart`
 `BuildContextExt` extension on `BuildContext`:
@@ -370,10 +380,16 @@ Typed error model for platform-channel (Pigeon / Flutter method channel) failure
 
 #### `lib/core/extensions/platform_exception_extension.dart`
 `PlatformExceptionMapper` extension on `PlatformException`:
-- `toPlatformCallException()` – converts a raw Flutter/Pigeon `PlatformException` into a typed `PlatformCallException`
-  - Classifies `code` → `PlatformCallErrorCode` via a `switch` expression
-  - Auto-generates a user-friendly `message` when `PlatformException.message` is `null`
-  - Preserves the original `code` string in `PlatformCallException.originalCode`
+- `toPlatformCallException()` – converts a raw Flutter/Pigeon `PlatformException` into a typed `PlatformCallException` by mapping the raw `code` string to a `PlatformCallErrorCode`:
+
+| Raw code | Mapped to |
+|---|---|
+| `'permissionDenied'` | `PlatformCallErrorCode.permissionDenied` |
+| `'channelError'` | `PlatformCallErrorCode.channelError` |
+| `'nullError'` | `PlatformCallErrorCode.nullError` |
+| anything else | `PlatformCallErrorCode.unknown` |
+
+A human-readable `message` is generated automatically when the original exception message is null.
 
 ---
 
@@ -382,23 +398,58 @@ Static utility class:
 - `getUUID()` – generates a UUID v4 string
 - `getEmployeeName(contact)` – returns a formatted display name, falls back to `'-'`
 - `formatEmployeeName(firstName, lastName)` – formats as `"lastName firstName"`, handles nulls/empty values
-- `getContactPermission()` – checks and requests `Permission.contacts` if not already granted; called during app startup inside `startupProvider`
+- `getContactPermission()` – checks and requests `Permission.contacts` if not already granted
 
 #### `lib/core/helpers/network_utils.dart`
-Static retry/timeout wrapper for platform-channel (Pigeon) calls.
+`NetworkUtils` – utility class for executing platform-channel calls with **timeout** and **auto-retry** logic.
 
-`withTimeoutAndRetry<T>(action, {timeout, maxRetries})`:
-- Runs `action()` with a `timeout` (default 5 s) and up to `maxRetries` retries (default 2)
-- Uses the `PlatformExceptionMapper` extension to convert raw `PlatformException` → `PlatformCallException`
-- **Non-retryable codes** (`permissionDenied`, `channelError`, `nullError`) are thrown immediately without retrying
-- `TimeoutException` is converted to `PlatformCallException.timeout()` and thrown after all retries are exhausted
-- Any already-classified `PlatformCallException` is re-thrown immediately
+**`withTimeoutAndRetry<T>(action, ref, {timeout, maxRetries})`**
+
+| Parameter | Default | Description |
+|---|---|---|
+| `action` | — | `Future<T> Function()` – the platform call to execute |
+| `ref` | — | Riverpod `Ref` used to notify `errorProvider` on failure |
+| `timeout` | `5 s` | Maximum duration per attempt |
+| `maxRetries` | `2` | Maximum number of retry attempts |
+
+**Behavior:**
+1. Executes `action()` with the specified `timeout`.
+2. On `PlatformException`: maps to `PlatformCallException` via `PlatformExceptionMapper.toPlatformCallException()`, then notifies `errorProvider` via `ref.read(errorProvider.notifier).notify(wrapped)`.
+3. Non-retriable errors (`permissionDenied`, `channelError`, `nullError`) are **thrown immediately** without retrying.
+4. On `TimeoutException`: throws `PlatformCallException.timeout()` after exhausting retries.
+5. On any other exception: re-throws after exhausting retries.
 
 ---
 
 #### `lib/core/presentation/pages/base_page.dart`
 `BasePage` – base class for all feature pages (extends `HookConsumerWidget`):
 - `showSnackBar(context, message, {isError})` – displays a styled green (success) or red (error) snackbar
+- `listenErrorPlatform(context, ref, void Function(PlatformCallException)? action)` – listens to `errorProvider` and reacts when a new `PlatformCallException` is emitted:
+  - If `action` is provided, calls `action(exception)` (custom handler per page)
+  - If `action` is null, shows a red snackbar with `exception.message` (default behaviour)
+  - Always clears the error from `errorProvider` after handling it
+  - Guards against duplicate emissions by checking `next != prev`
+
+**Usage pattern in a page:**
+```dart
+class MyPageView extends BasePage {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Default: show red snackbar automatically
+    listenErrorPlatform(context, ref, null);
+
+    // Custom: handle specific error codes differently
+    listenErrorPlatform(context, ref, (e) {
+      if (e.errorCode == PlatformCallErrorCode.permissionDenied) {
+        // open app settings
+      } else {
+        showSnackBar(context, e.message, isError: true);
+      }
+    });
+    // ...
+  }
+}
+```
 
 #### `lib/core/presentation/widgets/bottom_navigation_bar_widget.dart`
 Shared `BottomNavigationBarWidget` (used in `MainPage`):
@@ -523,14 +574,11 @@ Freezed state `ContactState`:
 - `build()` → returns initial empty `ContactState`
 - `getAllContactFromApi(request)` – fetches from API → upserts all contacts to Isar → reads back from Isar → emits updated `ContactState`
 - `getAllContact()` – reads from local Isar only (used on pull-to-refresh)
-- `getAllContactFromDevice()` – calls `ContactService.getContactsFromDevice()` (Pigeon) to fetch contacts from the device's native contacts store. Handles `PlatformCallException` with per-code user-facing messages:
-
-  | `PlatformCallErrorCode` | Message emitted |
-  |---|---|
-  | `permissionDenied` | "Contacts permission is required. Please enable it in Settings." |
-  | `channelError` | "Could not connect to the native platform. Please restart the app." |
-  | `timeout` | "Request timed out. Please try again." |
-  | `nullError` / `unknown` | The raw message from the exception |
+- `getContactSoftDelete(contacts)` – identifies soft-deleted contacts from the API list
+- `getAllContactFromDevice()` – fetches contacts from the native device via `ContactService.getContactsFromDevice()`:
+  - On success: upserts to Isar and emits `ContactState` with updated list
+  - On `PlatformCallException`: `NetworkUtils.withTimeoutAndRetry` has already notified `errorProvider`; the notifier emits a safe `AsyncData` with empty contacts so the UI does not show an error screen
+  - On other exceptions: emits `AsyncError`
 
 ##### `presentation/pages/contact_page.dart`
 `ContactPage` / `ContactPageView` (extends `BasePage`):
@@ -758,30 +806,6 @@ Topics covered in the guide:
 - Registering on Android in `MainActivity.kt`
 - Creating a Dart service wrapper
 
-### Generated Service Wrappers
-
-#### `lib/generated/pigeons/services/contact_service.dart`
-Dart service wrapper around the generated `ContactApi` Pigeon class:
-- `getContactsFromDevice()` – calls `ContactApi.getContacts()` through `NetworkUtils.withTimeoutAndRetry` so all retries, timeouts, and error classification are handled automatically.
-- Throws `PlatformCallException` on any failure; callers should catch it and branch on `errorCode`:
-
-```dart
-try {
-  final contacts = await ContactService().getContactsFromDevice();
-} on PlatformCallException catch (e) {
-  switch (e.errorCode) {
-    case PlatformCallErrorCode.permissionDenied:
-      // prompt user to open Settings
-    case PlatformCallErrorCode.channelError:
-      // ask user to restart the app
-    case PlatformCallErrorCode.timeout:
-      // suggest retrying
-    default:
-      // show e.message
-  }
-}
-```
-
 ---
 
 ## Localization
@@ -873,9 +897,85 @@ flutter build ios --release --flavor production --target lib/main_production.dar
 - **Provider naming**: `appProvider` is the auto-generated provider name for `AppNotifier` (via `@riverpod`). Similarly `contactProvider` for `ContactNotifier`, `mainProvider` for `MainNotifier`, `authProvider` for `AuthNotifier`.
 - **Auth redirect**: GoRouter's `redirect` in `appRouterProvider` checks `storageManagement.accessToken` on every navigation. After login/logout, call `ref.read(goRouterRefreshNotifierProvider).refresh()` to immediately trigger a re-evaluation.
 - **`ref.listen` action filtering**: When a notifier has multiple methods, add an `action` enum field (e.g. `AuthAction`) to the state. In `ref.listen`, check `next.value?.action` to react only to the intended method and ignore other state changes.
-- **Platform error handling**: All Pigeon / method-channel calls are wrapped by `NetworkUtils.withTimeoutAndRetry`. Raw `PlatformException`s are converted to `PlatformCallException` via the `PlatformExceptionMapper` extension (`e.toPlatformCallException()`). Notifiers catch `PlatformCallException` before the generic `Exception` catch and branch on `errorCode` to emit user-friendly messages. Non-retryable codes (`permissionDenied`, `channelError`, `nullError`) are thrown immediately; others are retried up to `maxRetries` times.
 - **Proxy detection**: `HttpOverridesImpl` reads system proxy settings inside `http_overrides_impl.dart`.
 - **Generated files** (`*.g.dart`, `*.freezed.dart`) must never be edited manually. Always re-run `build_runner` to regenerate them.
 - **Adding a new Isar collection**: Register the new `CollectionSchema` in `DatabaseLocalManagement._schemas` inside `database_local_management_provider.dart`.
 - **Adding a new feature**: Mirror the `contacts` folder structure – create `constants`, `enums`, `data` (model → datasource → repository), `domain` (entity → repository contract → usecase), and `presentation` (state → notifier → page).
-- **Adding a new Pigeon API**: Define a new `@HostApi` class in `lib/generated/pigeons/api/`, run the generator, create `*Impl` classes on iOS and Android, register them in `AppDelegate.swift` / `MainActivity.kt`, then wrap calls in a service class under `lib/generated/pigeons/services/` using `NetworkUtils.withTimeoutAndRetry`.
+
+---
+
+## Global Platform Error Boundary
+
+All Pigeon / platform-channel errors flow through a single, app-wide pipeline so that every page can surface them consistently without duplicating try/catch logic.
+
+### Architecture
+
+```
+Native platform
+  │  PlatformException (raw)
+  ▼
+NetworkUtils.withTimeoutAndRetry()          ← lib/core/helpers/network_utils.dart
+  │  PlatformException.toPlatformCallException()  (PlatformExceptionMapper extension)
+  │  → PlatformCallException (typed)
+  │
+  ├─▶ ref.read(errorProvider.notifier).notify(exception)   ← broadcast to UI
+  │         (ErrorNotifier — lib/core/error/error_notifier.dart)
+  │
+  └─▶ throw PlatformCallException             ← notifier catches & handles state
+            │
+            ▼
+      ContactNotifier.getAllContactFromDevice()
+        on PlatformCallException → emit safe AsyncData (UI stays functional)
+        on other Exception      → emit AsyncError
+
+UI layer (BasePage.listenErrorPlatform)      ← lib/core/presentation/pages/base_page.dart
+  │  ref.listen(errorProvider, ...)
+  ├─ custom action provided → call action(exception)
+  └─ no action              → showSnackBar(message, isError: true)
+                              ref.read(errorProvider.notifier).clear()
+```
+
+### Key files
+
+| File | Role |
+|---|---|
+| `lib/core/error/platform_call_exception.dart` | Typed exception + `PlatformCallErrorCode` enum |
+| `lib/core/error/error_notifier.dart` | Global `errorProvider` — broadcasts platform errors to the UI |
+| `lib/core/extensions/platform_exception_extension.dart` | `PlatformExceptionMapper` — maps raw `PlatformException` → `PlatformCallException` |
+| `lib/core/helpers/network_utils.dart` | `withTimeoutAndRetry` — executes platform calls with timeout, retry, and automatic error broadcasting |
+| `lib/core/presentation/pages/base_page.dart` | `listenErrorPlatform` — convenience listener for pages to react to `errorProvider` |
+| `lib/generated/pigeons/services/contact_service.dart` | Uses `NetworkUtils.withTimeoutAndRetry` for all native contact calls |
+
+### Adding platform error handling to a new page
+
+```dart
+class MyPageView extends BasePage {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Option A — default: auto-show red snackbar
+    listenErrorPlatform(context, ref, null);
+
+    // Option B — custom: handle specific codes
+    listenErrorPlatform(context, ref, (e) {
+      if (e.errorCode == PlatformCallErrorCode.permissionDenied) {
+        openAppSettings(); // direct user to Settings
+      } else {
+        showSnackBar(context, e.message, isError: true);
+      }
+    });
+
+    return Scaffold(/* ... */);
+  }
+}
+```
+
+### Error codes reference
+
+| `PlatformCallErrorCode` | `isNonRetriable` | Typical cause |
+|---|---|---|
+| `permissionDenied` | ✅ | User declined OS permission prompt |
+| `channelError` | ✅ | Pigeon channel not registered / engine not ready |
+| `nullError` | ✅ | Native side returned null unexpectedly |
+| `timeout` | ❌ | Native call exceeded the configured timeout |
+| `unknown` | ❌ | Any other unclassified native error |
+

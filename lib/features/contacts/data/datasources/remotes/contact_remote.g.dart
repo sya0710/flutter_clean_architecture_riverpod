@@ -33,7 +33,7 @@ class _ContactRemote implements ContactRemote {
           Options(method: 'POST', headers: _headers, extra: _extra)
               .compose(
                 _dio.options,
-                '/api/mobile/v1/contacts/accessible',
+                '/contacts',
                 queryParameters: queryParameters,
                 data: _data,
               )

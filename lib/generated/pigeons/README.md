@@ -244,29 +244,45 @@ class MainActivity : FlutterActivity() {
 Create `lib/generated/pigeons/services/my_feature_service.dart`:
 
 ```dart
-import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpodlive/core/helpers/network_utils.dart';
 import 'package:riverpodlive/generated/pigeons/api/my_feature_api.g.dart';
 
 class MyFeatureService {
   final MyFeatureApi _api = MyFeatureApi();
 
-  Future<MyData> getDataById(String id) async {
-    try {
-      return await _api.getDataById(id);
-    } on PlatformException catch (e) {
-      throw Exception('Platform error: ${e.message}');
-    }
+  /// Fetches data by ID from the native platform.
+  ///
+  /// Uses [NetworkUtils.withTimeoutAndRetry] to:
+  /// - Automatically retry transient errors (up to 2 attempts).
+  /// - Map [PlatformException] → [PlatformCallException] via
+  ///   [PlatformExceptionMapper].
+  /// - Broadcast any [PlatformCallException] to [errorProvider] so the UI
+  ///   layer can react via [BasePage.listenErrorPlatform].
+  Future<MyData> getDataById(String id, Ref ref) async {
+    return NetworkUtils.withTimeoutAndRetry(() => _api.getDataById(id), ref);
   }
 
-  Future<List<MyData>> getAllData() async {
-    try {
-      return await _api.getAllData();
-    } on PlatformException catch (e) {
-      throw Exception('Platform error: ${e.message}');
-    }
+  Future<List<MyData>> getAllData(Ref ref) async {
+    return NetworkUtils.withTimeoutAndRetry(_api.getAllData, ref);
   }
 }
 ```
+
+> 📌 **Reference implementation:** `lib/generated/pigeons/services/contact_service.dart`
+
+```dart
+// contact_service.dart — real example in this project
+class ContactService {
+  final ContactApi _api = ContactApi();
+
+  Future<List<Contact>> getContactsFromDevice(Ref ref) async {
+    return NetworkUtils.withTimeoutAndRetry(_api.getContacts, ref);
+  }
+}
+```
+
+> ⚠️ Always pass `Ref ref` from the calling notifier so that `NetworkUtils` can notify `errorProvider` and the UI layer receives the error automatically.
 
 ---
 

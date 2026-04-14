@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:riverpodlive/core/error/error_notifier.dart';
+import 'package:riverpodlive/core/error/platform_call_exception.dart';
 import 'package:riverpodlive/core/extensions/context_extension.dart';
 
 class BasePage extends HookConsumerWidget {
@@ -28,6 +30,25 @@ class BasePage extends HookConsumerWidget {
         ),
       ),
     );
+  }
+
+  // Listen for errors and show snack bar
+  void listenErrorPlatform(
+    BuildContext context,
+    WidgetRef ref,
+    void Function(PlatformCallException)? action,
+  ) {
+    ref.listen<PlatformCallException?>(errorProvider, (prev, next) {
+      if (next == null || next == prev) return;
+
+      if (action != null) {
+        action(next);
+      } else {
+        showSnackBar(context, next.message, isError: true);
+      }
+
+      ref.read(errorProvider.notifier).clear();
+    });
   }
 
   @override
