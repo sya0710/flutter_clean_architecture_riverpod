@@ -893,18 +893,6 @@ flutter build ios --release --flavor production --target lib/main_production.dar
 
 ---
 
-## Notes
-
-- **Provider naming**: `appProvider` is the auto-generated provider name for `AppNotifier` (via `@riverpod`). Similarly `contactProvider` for `ContactNotifier`, `mainProvider` for `MainNotifier`, `authProvider` for `AuthNotifier`.
-- **Auth redirect**: GoRouter's `redirect` in `appRouterProvider` checks `storageManagement.accessToken` on every navigation. After login/logout, call `ref.read(goRouterRefreshNotifierProvider).refresh()` to immediately trigger a re-evaluation.
-- **`ref.listen` action filtering**: When a notifier has multiple methods, add an `action` enum field (e.g. `AuthAction`) to the state. In `ref.listen`, check `next.value?.action` to react only to the intended method and ignore other state changes.
-- **Proxy detection**: `HttpOverridesImpl` reads system proxy settings inside `http_overrides_impl.dart`.
-- **Generated files** (`*.g.dart`, `*.freezed.dart`) must never be edited manually. Always re-run `build_runner` to regenerate them.
-- **Adding a new Isar collection**: Register the new `CollectionSchema` in `DatabaseLocalManagement._schemas` inside `database_local_management_provider.dart`.
-- **Adding a new feature**: Mirror the `contacts` folder structure – create `constants`, `enums`, `data` (model → datasource → repository), `domain` (entity → repository contract → usecase), and `presentation` (state → notifier → page).
-
----
-
 ## Global Platform Error Boundary
 
 All Pigeon / platform-channel errors flow through a single, app-wide pipeline so that every page can surface them consistently without duplicating try/catch logic.
@@ -1192,4 +1180,14 @@ flutter pub get
 # Regenerate Isar schema for SyncTaskModel (replaces the manual .g.dart stub)
 dart run build_runner build --delete-conflicting-outputs
 ```
+---
 
+## Notes
+
+- **Provider naming**: `appProvider` is the auto-generated provider name for `AppNotifier` (via `@riverpod`). Similarly `contactProvider` for `ContactNotifier`, `mainProvider` for `MainNotifier`, `authProvider` for `AuthNotifier`.
+- **Auth redirect**: GoRouter's `redirect` in `appRouterProvider` checks `storageManagement.accessToken` on every navigation. After login/logout, call `ref.read(goRouterRefreshNotifierProvider).refresh()` to immediately trigger a re-evaluation.
+- **`ref.listen` action filtering**: When a notifier has multiple methods, add an `action` enum field (e.g. `AuthAction`) to the state. In `ref.listen`, check `next.value?.action` to react only to the intended method and ignore other state changes.
+- **Proxy detection**: `HttpOverridesImpl` reads system proxy settings inside `http_overrides_impl.dart`.
+- **Generated files** (`*.g.dart`, `*.freezed.dart`) must never be edited manually. Always re-run `build_runner` to regenerate them.
+- **Adding a new Isar collection**: Register the new `CollectionSchema` in `DatabaseLocalManagement._schemas` inside `database_local_management_provider.dart`.
+- **Adding a new feature**: Mirror the `contacts` folder structure – create `constants`, `enums`, `data` (model → datasource → repository), `domain` (entity → repository contract → usecase), and `presentation` (state → notifier → page).
