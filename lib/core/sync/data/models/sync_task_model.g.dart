@@ -63,18 +63,23 @@ const SyncTaskModelSchema = CollectionSchema(
       type: IsarType.long,
     ),
     r'payload': PropertySchema(id: 9, name: r'payload', type: IsarType.string),
-    r'retryCount': PropertySchema(
+    r'priorityIndex': PropertySchema(
       id: 10,
+      name: r'priorityIndex',
+      type: IsarType.long,
+    ),
+    r'retryCount': PropertySchema(
+      id: 11,
       name: r'retryCount',
       type: IsarType.long,
     ),
     r'serverVersion': PropertySchema(
-      id: 11,
+      id: 12,
       name: r'serverVersion',
       type: IsarType.string,
     ),
     r'statusIndex': PropertySchema(
-      id: 12,
+      id: 13,
       name: r'statusIndex',
       type: IsarType.long,
     ),
@@ -120,6 +125,19 @@ const SyncTaskModelSchema = CollectionSchema(
       properties: [
         IndexPropertySchema(
           name: r'statusIndex',
+          type: IndexType.value,
+          caseSensitive: false,
+        ),
+      ],
+    ),
+    r'priorityIndex': IndexSchema(
+      id: 1513594599038388933,
+      name: r'priorityIndex',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'priorityIndex',
           type: IndexType.value,
           caseSensitive: false,
         ),
@@ -200,9 +218,10 @@ void _syncTaskModelSerialize(
   writer.writeLong(offsets[7], object.maxRetries);
   writer.writeLong(offsets[8], object.operationIndex);
   writer.writeString(offsets[9], object.payload);
-  writer.writeLong(offsets[10], object.retryCount);
-  writer.writeString(offsets[11], object.serverVersion);
-  writer.writeLong(offsets[12], object.statusIndex);
+  writer.writeLong(offsets[10], object.priorityIndex);
+  writer.writeLong(offsets[11], object.retryCount);
+  writer.writeString(offsets[12], object.serverVersion);
+  writer.writeLong(offsets[13], object.statusIndex);
 }
 
 SyncTaskModel _syncTaskModelDeserialize(
@@ -223,9 +242,10 @@ SyncTaskModel _syncTaskModelDeserialize(
   object.maxRetries = reader.readLong(offsets[7]);
   object.operationIndex = reader.readLong(offsets[8]);
   object.payload = reader.readString(offsets[9]);
-  object.retryCount = reader.readLong(offsets[10]);
-  object.serverVersion = reader.readStringOrNull(offsets[11]);
-  object.statusIndex = reader.readLong(offsets[12]);
+  object.priorityIndex = reader.readLong(offsets[10]);
+  object.retryCount = reader.readLong(offsets[11]);
+  object.serverVersion = reader.readStringOrNull(offsets[12]);
+  object.statusIndex = reader.readLong(offsets[13]);
   return object;
 }
 
@@ -259,8 +279,10 @@ P _syncTaskModelDeserializeProp<P>(
     case 10:
       return (reader.readLong(offset)) as P;
     case 11:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readLong(offset)) as P;
     case 12:
+      return (reader.readStringOrNull(offset)) as P;
+    case 13:
       return (reader.readLong(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -295,6 +317,14 @@ extension SyncTaskModelQueryWhereSort
     return QueryBuilder.apply(this, (query) {
       return query.addWhereClause(
         const IndexWhereClause.any(indexName: r'statusIndex'),
+      );
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterWhere> anyPriorityIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        const IndexWhereClause.any(indexName: r'priorityIndex'),
       );
     });
   }
@@ -586,6 +616,109 @@ extension SyncTaskModelQueryWhere
           lower: [lowerStatusIndex],
           includeLower: includeLower,
           upper: [upperStatusIndex],
+          includeUpper: includeUpper,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterWhereClause>
+  priorityIndexEqualTo(int priorityIndex) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.equalTo(
+          indexName: r'priorityIndex',
+          value: [priorityIndex],
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterWhereClause>
+  priorityIndexNotEqualTo(int priorityIndex) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'priorityIndex',
+                lower: [],
+                upper: [priorityIndex],
+                includeUpper: false,
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'priorityIndex',
+                lower: [priorityIndex],
+                includeLower: false,
+                upper: [],
+              ),
+            );
+      } else {
+        return query
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'priorityIndex',
+                lower: [priorityIndex],
+                includeLower: false,
+                upper: [],
+              ),
+            )
+            .addWhereClause(
+              IndexWhereClause.between(
+                indexName: r'priorityIndex',
+                lower: [],
+                upper: [priorityIndex],
+                includeUpper: false,
+              ),
+            );
+      }
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterWhereClause>
+  priorityIndexGreaterThan(int priorityIndex, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.between(
+          indexName: r'priorityIndex',
+          lower: [priorityIndex],
+          includeLower: include,
+          upper: [],
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterWhereClause>
+  priorityIndexLessThan(int priorityIndex, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.between(
+          indexName: r'priorityIndex',
+          lower: [],
+          upper: [priorityIndex],
+          includeUpper: include,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterWhereClause>
+  priorityIndexBetween(
+    int lowerPriorityIndex,
+    int upperPriorityIndex, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(
+        IndexWhereClause.between(
+          indexName: r'priorityIndex',
+          lower: [lowerPriorityIndex],
+          includeLower: includeLower,
+          upper: [upperPriorityIndex],
           includeUpper: includeUpper,
         ),
       );
@@ -1891,6 +2024,61 @@ extension SyncTaskModelQueryFilter
   }
 
   QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterFilterCondition>
+  priorityIndexEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.equalTo(property: r'priorityIndex', value: value),
+      );
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterFilterCondition>
+  priorityIndexGreaterThan(int value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.greaterThan(
+          include: include,
+          property: r'priorityIndex',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterFilterCondition>
+  priorityIndexLessThan(int value, {bool include = false}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.lessThan(
+          include: include,
+          property: r'priorityIndex',
+          value: value,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterFilterCondition>
+  priorityIndexBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(
+        FilterCondition.between(
+          property: r'priorityIndex',
+          lower: lower,
+          includeLower: includeLower,
+          upper: upper,
+          includeUpper: includeUpper,
+        ),
+      );
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterFilterCondition>
   retryCountEqualTo(int value) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(
@@ -2303,6 +2491,20 @@ extension SyncTaskModelQuerySortBy
     });
   }
 
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterSortBy>
+  sortByPriorityIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'priorityIndex', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterSortBy>
+  sortByPriorityIndexDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'priorityIndex', Sort.desc);
+    });
+  }
+
   QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterSortBy> sortByRetryCount() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'retryCount', Sort.asc);
@@ -2493,6 +2695,20 @@ extension SyncTaskModelQuerySortThenBy
     });
   }
 
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterSortBy>
+  thenByPriorityIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'priorityIndex', Sort.asc);
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterSortBy>
+  thenByPriorityIndexDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'priorityIndex', Sort.desc);
+    });
+  }
+
   QueryBuilder<SyncTaskModel, SyncTaskModel, QAfterSortBy> thenByRetryCount() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'retryCount', Sort.asc);
@@ -2614,6 +2830,13 @@ extension SyncTaskModelQueryWhereDistinct
     });
   }
 
+  QueryBuilder<SyncTaskModel, SyncTaskModel, QDistinct>
+  distinctByPriorityIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'priorityIndex');
+    });
+  }
+
   QueryBuilder<SyncTaskModel, SyncTaskModel, QDistinct> distinctByRetryCount() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'retryCount');
@@ -2708,6 +2931,12 @@ extension SyncTaskModelQueryProperty
   QueryBuilder<SyncTaskModel, String, QQueryOperations> payloadProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'payload');
+    });
+  }
+
+  QueryBuilder<SyncTaskModel, int, QQueryOperations> priorityIndexProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'priorityIndex');
     });
   }
 

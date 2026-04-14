@@ -993,6 +993,7 @@ lib/core/sync/
 ├── domain/
 │   ├── enums/
 │   │   ├── sync_operation.dart       # create | update | delete
+│   │   ├── sync_priority.dart        # critical | high | normal | low
 │   │   └── sync_status.dart          # pending | inProgress | synced | failed | conflict
 │   └── conflict/
 │       ├── sync_conflict_resolver.dart     # Abstract strategy + ConflictResolution sealed class
@@ -1022,10 +1023,10 @@ lib/features/contacts/data/datasources/local/
 ```
 User write (offline)
   │
-  └─▶ ContactLocalImpl.upsertContact(contact, enqueueSync: true)
+  └─▶ ContactLocalImpl.upsertContact(contact, enqueueSync: true, priority: SyncPriority.high)
          │  Single Isar writeTxn
          ├─ isar.contactModels.put(contact)      ← entity persisted
-         └─ isar.syncTaskModels.put(SyncTask)    ← queue entry (atomic!)
+         └─ isar.syncTaskModels.put(SyncTask)    ← queue entry (atomic!, priorityIndex set)
 
 isar.syncTaskModels.watchLazy()  ──emits──▶  SyncEngine._queueSub
                                                   │  debounce 300 ms
@@ -1035,6 +1036,7 @@ networkStatusProvider (connectivity_plus)  ──▶  SyncEngine._networkSub
                                                   ▼
                                          SyncEngine._drainQueue()
                                            │  batch 50 tasks
+                                           │  sorted by priorityIndex ASC → createdAt ASC
                                            ▼
                                     SyncWorker.processTask(task)
                                       ├─ mark inProgress
@@ -1064,6 +1066,7 @@ SyncGarbageCollector (startup + every 24 h)
 | `entityRemoteId` | `String?` | Server ID (null until first successful create) |
 | `operationIndex` | `int` | `SyncOperation` ordinal |
 | `statusIndex` | `int` | `SyncStatus` ordinal — indexed for fast pending queries |
+| `priorityIndex` | `int` | `SyncPriority` ordinal — **indexed**; lower = processed first |
 | `payload` | `String` | JSON snapshot captured **at enqueue time** |
 | `retryCount` | `int` | Number of push attempts made |
 | `maxRetries` | `int` | Threshold before marking failed (default 3) |
@@ -1072,6 +1075,48 @@ SyncGarbageCollector (startup + every 24 h)
 | `errorMessage` | `String?` | Human-readable error from last failure |
 | `localVersion` | `String?` | Entity `updatedAt` at enqueue — used by conflict resolver |
 | `serverVersion` | `String?` | Last known server `updatedAt` — set after sync/conflict |
+
+### Task Priority
+
+The `SyncPriority` enum controls which pending tasks the engine processes first:
+
+| Value | Ordinal | When to use |
+|---|---|---|
+| `critical` | 0 | Payment confirmations, order submissions — must reach the server ASAP |
+| `high` | 1 | Sending messages, deleting a record |
+| `normal` | 2 | Default — contact edits, saving a form |
+| `low` | 3 | Background / best-effort — analytics events, preference caching |
+
+**Sorting rule:** `priorityIndex ASC` → `createdAt ASC` (within the same priority, oldest task first).
+
+#### Enqueueing with explicit priority
+
+```dart
+// 💳 Payment — process before anything else
+await paymentLocal.savePayment(
+  payment,
+  enqueueSync: true,
+  priority: SyncPriority.critical,
+);
+
+// 👤 Profile update — normal, no rush
+await contactLocal.upsertContact(
+  contact,
+  enqueueSync: true,
+  // priority defaults to SyncPriority.normal
+);
+```
+
+For entities that don't yet expose a `priority` parameter you can always set the
+field directly on the model before enqueueing:
+
+```dart
+final task = SyncTaskModel()
+  ..entityType = 'payment'
+  ..priority = SyncPriority.critical   // typed setter
+  // ... other fields
+await queue.enqueue(task);
+```
 
 ### Conflict resolution
 
@@ -1091,15 +1136,22 @@ final syncConflictResolverProvider = Provider<SyncConflictResolver>((ref) {
 ### Enqueueing a local write (atomic)
 
 ```dart
-// In a notifier or use case — passes enqueueSync: true for locally-originated writes
+// Normal write — default priority (SyncPriority.normal)
 await ref.read(contactLocalProvider).upsertContact(
   contact,
-  enqueueSync: true,  // writes SyncTaskModel in same Isar transaction
+  enqueueSync: true,
 );
 
-// For soft-deletes
+// High-priority write — processed before normal/low tasks
+await ref.read(contactLocalProvider).upsertContact(
+  contact,
+  enqueueSync: true,
+  priority: SyncPriority.high,
+);
+
+// For soft-deletes (also supports priority)
 await (ref.read(contactLocalProvider) as ContactLocalImpl)
-    .softDeleteContact(contact);
+    .softDeleteContact(contact, priority: SyncPriority.high);
 ```
 
 ### Registering a new entity type
@@ -1129,6 +1181,7 @@ final syncAdapterRegistryProvider = Provider<Map<String, SyncAdapter>>((ref) {
 | `_isProcessing` guard | Prevents overlapping concurrent drain runs |
 | GC every 24 h | Frees disk space from stale queue rows |
 | `enqueueSync: false` (default) | Server-synced data does not re-enter the queue |
+| `priorityIndex` DB index | Priority sort uses a native Isar index — no in-memory sort overhead |
 
 ### Setup — run after adding `SyncTaskModel`
 

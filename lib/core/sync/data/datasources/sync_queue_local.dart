@@ -21,7 +21,9 @@ abstract class SyncQueueLocal {
   /// ```
   Future<void> enqueueInTxn(Isar isar, SyncTaskModel task);
 
-  /// Returns up to [limit] pending tasks ordered by [SyncTaskModel.createdAt].
+  /// Returns up to [limit] pending tasks ordered by [SyncTaskModel.priorityIndex]
+  /// ascending (critical first) then by [SyncTaskModel.createdAt] ascending
+  /// (oldest first within the same priority level).
   Future<List<SyncTaskModel>> getPending({int limit = 50});
 
   /// Persist any field changes on [task] (retry count, status, error, etc.).
@@ -82,7 +84,8 @@ class SyncQueueLocalImpl implements SyncQueueLocal {
     return _isar.syncTaskModels
         .filter()
         .statusIndexEqualTo(SyncStatus.pending.index)
-        .sortByCreatedAt()
+        .sortByPriorityIndex() // critical(0) before high(1) before normal(2) before low(3)
+        .thenByCreatedAt() // oldest first within the same priority level
         .limit(limit)
         .findAll();
   }

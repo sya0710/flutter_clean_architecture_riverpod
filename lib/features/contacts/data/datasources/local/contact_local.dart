@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:isar_community/isar.dart';
 import 'package:riverpodlive/core/sync/data/models/sync_task_model.dart';
 import 'package:riverpodlive/core/sync/domain/enums/sync_operation.dart';
+import 'package:riverpodlive/core/sync/domain/enums/sync_priority.dart';
 import 'package:riverpodlive/core/sync/domain/enums/sync_status.dart';
 import 'package:riverpodlive/features/contacts/constants/contact_status_constant.dart';
 import 'package:riverpodlive/features/contacts/data/datasources/local/contact_sync_adapter.dart';
@@ -17,15 +18,23 @@ abstract class ContactLocal {
   ///
   /// Leave [enqueueSync] as `false` (default) for server-originated writes
   /// (i.e. data already synced from the API) to avoid a sync loop.
+  ///
+  /// [priority] controls the order in which pending tasks are processed.
+  /// Use [SyncPriority.critical] or [SyncPriority.high] for time-sensitive
+  /// operations (e.g. payment confirmation) so they are pushed before
+  /// lower-priority tasks (e.g. profile updates).
   Future<void> upsertContact(
     ContactModel contact, {
     bool enqueueSync = false,
+    SyncPriority priority = SyncPriority.normal,
   });
 
-  /// Batch upsert. Same [enqueueSync] semantics as [upsertContact].
+  /// Batch upsert. Same [enqueueSync] and [priority] semantics as
+  /// [upsertContact].
   Future<void> upsertContacts(
     List<ContactModel> contacts, {
     bool enqueueSync = false,
+    SyncPriority priority = SyncPriority.normal,
   });
 
   Future<List<ContactModel>> getAllContact();
@@ -40,6 +49,7 @@ class ContactLocalImpl implements ContactLocal {
   Future<void> upsertContact(
     ContactModel contact, {
     bool enqueueSync = false,
+    SyncPriority priority = SyncPriority.normal,
   }) async {
     await _isar.writeTxn(() async {
       final isNew = contact.id == Isar.autoIncrement;
@@ -53,6 +63,7 @@ class ContactLocalImpl implements ContactLocal {
           _buildSyncTask(
             contact,
             isCreate ? SyncOperation.create : SyncOperation.update,
+            priority: priority,
           ),
         );
       }
@@ -63,6 +74,7 @@ class ContactLocalImpl implements ContactLocal {
   Future<void> upsertContacts(
     List<ContactModel> contacts, {
     bool enqueueSync = false,
+    SyncPriority priority = SyncPriority.normal,
   }) async {
     if (contacts.isEmpty) return;
 
@@ -81,6 +93,7 @@ class ContactLocalImpl implements ContactLocal {
             _buildSyncTask(
               contact,
               isCreate ? SyncOperation.create : SyncOperation.update,
+              priority: priority,
             ),
           );
         }
@@ -94,7 +107,14 @@ class ContactLocalImpl implements ContactLocal {
   }
 
   /// Soft-delete a contact locally and enqueue a delete task (atomic).
-  Future<void> softDeleteContact(ContactModel contact) async {
+  ///
+  /// [priority] defaults to [SyncPriority.normal]. Pass
+  /// [SyncPriority.high] or [SyncPriority.critical] when the deletion
+  /// is time-sensitive.
+  Future<void> softDeleteContact(
+    ContactModel contact, {
+    SyncPriority priority = SyncPriority.normal,
+  }) async {
     await _isar.writeTxn(() async {
       contact
         ..status = ContactStatusConstant.deleted
@@ -102,7 +122,7 @@ class ContactLocalImpl implements ContactLocal {
       await _isar.contactModels.put(contact);
 
       await _isar.syncTaskModels.put(
-        _buildSyncTask(contact, SyncOperation.delete),
+        _buildSyncTask(contact, SyncOperation.delete, priority: priority),
       );
     });
   }
@@ -133,14 +153,16 @@ class ContactLocalImpl implements ContactLocal {
 
   SyncTaskModel _buildSyncTask(
     ContactModel contact,
-    SyncOperation operation,
-  ) {
+    SyncOperation operation, {
+    SyncPriority priority = SyncPriority.normal,
+  }) {
     return SyncTaskModel()
       ..entityType = ContactSyncAdapter.type
       ..entityLocalId = contact.idLocal ?? ''
       ..entityRemoteId = contact.identifier
       ..operationIndex = operation.index
       ..statusIndex = SyncStatus.pending.index
+      ..priorityIndex = priority.index
       ..payload = _toPayload(contact)
       ..localVersion = contact.updatedAt
       ..createdAt = DateTime.now();

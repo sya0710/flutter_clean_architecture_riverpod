@@ -1,5 +1,6 @@
 import 'package:isar_community/isar.dart';
 import 'package:riverpodlive/core/sync/domain/enums/sync_operation.dart';
+import 'package:riverpodlive/core/sync/domain/enums/sync_priority.dart';
 import 'package:riverpodlive/core/sync/domain/enums/sync_status.dart';
 
 part 'sync_task_model.g.dart';
@@ -33,6 +34,20 @@ class SyncTaskModel {
   /// [SyncStatus] stored as ordinal int; indexed for fast pending-query.
   @Index(type: IndexType.value)
   int statusIndex = SyncStatus.pending.index;
+
+  /// [SyncPriority] stored as its ordinal int.
+  ///
+  /// Lower value = **higher** urgency:
+  ///   `critical(0) > high(1) > normal(2) > low(3)`
+  ///
+  /// The sync engine sorts pending tasks by this value **ascending** so that
+  /// critical tasks (e.g. payments) are always processed before lower-priority
+  /// ones (e.g. profile updates). Within the same priority level tasks are
+  /// ordered by [createdAt] ascending (oldest first).
+  ///
+  /// Default: [SyncPriority.normal].
+  @Index(type: IndexType.value)
+  int priorityIndex = SyncPriority.normal.index;
 
   /// JSON snapshot of the entity captured **at enqueue time**.
   /// Allows the worker to push the exact version the user wrote.
@@ -72,6 +87,10 @@ class SyncTaskModel {
   SyncStatus get syncStatus => SyncStatus.values[statusIndex];
   set syncStatus(SyncStatus s) => statusIndex = s.index;
 
+  @ignore
+  SyncPriority get priority => SyncPriority.values[priorityIndex];
+  set priority(SyncPriority p) => priorityIndex = p.index;
+
   // ── Convenience predicates ───────────────────────────────────────────────
 
   @ignore
@@ -91,5 +110,6 @@ class SyncTaskModel {
   String toString() =>
       'SyncTaskModel('
       'id: $id, type: $entityType, localId: $entityLocalId, '
-      'op: $operation, status: $syncStatus, retries: $retryCount)';
+      'op: $operation, priority: ${priority.label}, '
+      'status: $syncStatus, retries: $retryCount)';
 }
