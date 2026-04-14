@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpodlive/core/di/providers/startup_provider.dart';
+import 'package:riverpodlive/core/sync/background/sync_background_service.dart';
+import 'package:riverpodlive/core/sync/di/sync_providers.dart';
 
 enum Flavor { dev, stg, production }
 
@@ -18,6 +20,25 @@ class _BootstrapPlaceholderApp extends StatelessWidget {
     return MaterialApp(
       home: Scaffold(body: child),
     );
+  }
+}
+
+/// Calls SyncEngine.drainOnce when the app resumes from background.
+///
+/// This ensures that any tasks processed (or partially processed) by the
+/// WorkManager background runner are immediately followed up while the app
+/// is in the foreground, minimising latency.
+class _SyncResumeObserver extends WidgetsBindingObserver {
+  _SyncResumeObserver(this._ref);
+
+  final WidgetRef _ref;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      log('[Bootstrap] App resumed — triggering sync drain');
+      _ref.read(syncEngineProvider).drainOnce();
+    }
   }
 }
 
@@ -66,6 +87,12 @@ Future<void> bootstrap(
 
   WidgetsFlutterBinding.ensureInitialized();
 
+  // 2️⃣ Background sync (WorkManager / BGTaskScheduler)
+  // Must be initialised before runApp so the callback dispatcher is registered
+  // before the OS could potentially fire a background task.
+  await SyncBackgroundService.initialize();
+  await SyncBackgroundService.schedulePeriodicSync();
+
   // 3️⃣ UI system (status bar, orientation …)
   await SystemChrome.setEnabledSystemUIMode(
     SystemUiMode.manual,
@@ -99,18 +126,25 @@ Future<void> bootstrap(
                 ),
               );
             },
-            data: (_) => FutureBuilder<Widget>(
-              future: (() async => await builder())(),
-              builder: (c, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const _BootstrapPlaceholderApp(
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                return snapshot.data ??
-                    const _BootstrapPlaceholderApp(child: SizedBox.shrink());
-              },
-            ),
+            data: (_) {
+              // Register the lifecycle observer once the engine is up so the
+              // app immediately drains on resume after a background sync run.
+              final observer = _SyncResumeObserver(ref);
+              WidgetsBinding.instance.addObserver(observer);
+
+              return FutureBuilder<Widget>(
+                future: (() async => await builder())(),
+                builder: (c, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const _BootstrapPlaceholderApp(
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  return snapshot.data ??
+                      const _BootstrapPlaceholderApp(child: SizedBox.shrink());
+                },
+              );
+            },
           );
         },
       ),

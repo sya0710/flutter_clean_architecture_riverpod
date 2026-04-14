@@ -77,6 +77,15 @@ class SyncEngine {
     log('[SyncEngine] Disposed');
   }
 
+  /// Trigger an immediate drain pass, bypassing the debounce timer.
+  ///
+  /// Useful for:
+  /// - Programmatic triggers (e.g. app resumed from background).
+  /// - Unit tests that need to await a deterministic drain.
+  ///
+  /// No-op if the engine is already processing or the device is offline.
+  Future<void> drainOnce() => _drainQueue();
+
   void _scheduleProcess() {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(_debounce, _drainQueue);

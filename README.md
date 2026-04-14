@@ -46,6 +46,7 @@ Designed for teams that want a scalable, production-ready foundation with clear 
 | Responsive UI | `flutter_screenutil` |
 | SVG | `flutter_svg` |
 | Logging | Custom isolate-based file logger |
+| Background Sync | `workmanager` (WorkManager on Android, BGTaskScheduler on iOS) |
 | Hooks | `flutter_hooks` |
 | Debugging | `requests_inspector` |
 | Proxy Detection | `detect_proxy_setting` |
@@ -1008,6 +1009,9 @@ lib/core/sync/
 │   ├── sync_worker.dart              # Processes a single SyncTaskModel
 │   ├── sync_garbage_collector.dart   # Removes stale synced/failed tasks + deleted entities
 │   └── sync_engine.dart             # Main orchestrator (Provider, keep-alive)
+├── background/
+│   ├── sync_background_runner.dart   # @pragma entry point — runs in WorkManager isolate
+│   └── sync_background_service.dart # Schedules periodic WorkManager / BGTask tasks
 └── di/
     └── sync_providers.dart           # All Riverpod providers for the sync subsystem
 
@@ -1170,6 +1174,64 @@ final syncAdapterRegistryProvider = Provider<Map<String, SyncAdapter>>((ref) {
 
 3. Enqueue tasks with `entityType = MyEntitySyncAdapter.type`
 
+### Background Sync (WorkManager / BGTaskScheduler)
+
+`SyncEngine` keeps the queue drained while the app is in the foreground.
+For large queues or users who switch away from the app, the OS can kill the
+process before all tasks are synced.  **`SyncBackgroundService`** registers a
+periodic background task via `workmanager` so the queue is drained even when
+the app is not running.
+
+#### How it works
+
+```
+OS (WorkManager / BGTaskScheduler)
+  │  fires task when: network connected + battery not critically low
+  │  minimum interval: 15 minutes (Android) / OS-discretion (iOS)
+  ▼
+backgroundCallbackDispatcher()          ← runs in a NEW Dart isolate
+  ├─ 1. WidgetsFlutterBinding.ensureInitialized()
+  ├─ 2. Check connectivity (bail-out if offline)
+  ├─ 3. DatabaseLocalManagement.instance.openDatabase()
+  │       └─ Opens a fresh Isar connection in this isolate
+  ├─ 4. ProviderContainer (headless Riverpod — no widget tree)
+  │       ├─ syncQueueLocalProvider  → SyncQueueLocalImpl
+  │       └─ syncWorkerProvider      → SyncWorker (with valid Ref)
+  ├─ 5. Drain loop (priority-ordered, batch 50)
+  │       └─ worker.processTask(task) for each pending task
+  ├─ 6. container.dispose()
+  └─ 7. return true (done) / false (retry with exponential back-off)
+```
+
+#### Platform setup summary
+
+| Step | Android | iOS |
+|---|---|---|
+| Permission | `RECEIVE_BOOT_COMPLETED`, `ACCESS_NETWORK_STATE`, `FOREGROUND_SERVICE` in `AndroidManifest.xml` | `BGTaskSchedulerPermittedIdentifiers` in `Info.plist` |
+| Registration | WorkManager auto-initialised via `androidx.startup` | `workmanager` registers `BGProcessingTask` automatically |
+| Minimum interval | 15 minutes | OS discretion (typically 15 min+ in practice) |
+| Network constraint | `NetworkType.connected` | OS ensures connectivity before firing |
+
+#### Triggering a drain from the foreground
+
+```dart
+// After app resumes from background — run immediately without waiting for
+// the debounce timer or the next WorkManager cycle.
+ref.read(syncEngineProvider).drainOnce();
+```
+
+#### Cancelling background sync (e.g. on sign-out)
+
+```dart
+await SyncBackgroundService.cancelAll();
+```
+
+#### Changing the task identifier
+
+> If you rename the app's bundle ID away from `com.example.riverpod`, update
+> `SyncBackgroundService.taskUniqueName` **and** the
+> `BGTaskSchedulerPermittedIdentifiers` entry in `ios/Runner/Info.plist`.
+
 ### Performance & battery considerations
 
 | Mechanism | Benefit |
@@ -1182,14 +1244,22 @@ final syncAdapterRegistryProvider = Provider<Map<String, SyncAdapter>>((ref) {
 | GC every 24 h | Frees disk space from stale queue rows |
 | `enqueueSync: false` (default) | Server-synced data does not re-enter the queue |
 | `priorityIndex` DB index | Priority sort uses a native Isar index — no in-memory sort overhead |
+| WorkManager constraints | Task fires only on `NetworkType.connected` + `requiresBatteryNotLow` |
+| BGTaskScheduler | iOS defers task to a low-power window selected by the OS |
+| `_isProcessing` guard (foreground) + WorkManager single-instance | Prevents overlapping drain runs across foreground + background |
 
 ### Setup — run after adding `SyncTaskModel`
 
 ```bash
-# Install connectivity_plus (already added to pubspec.yaml)
+# Fetch all dependencies (including workmanager)
 flutter pub get
 
 # Regenerate Isar schema for SyncTaskModel (replaces the manual .g.dart stub)
 dart run build_runner build --delete-conflicting-outputs
 ```
+
+> **iOS extra step** — after running `flutter pub get`, open `ios/` in Xcode and
+> add the `Background Processing` and `Background Fetch` capabilities to the
+> Runner target under *Signing & Capabilities*.  This is required for iOS
+> BGTaskScheduler to call the registered tasks.
 
