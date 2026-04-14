@@ -27,6 +27,7 @@ Designed for teams that want a scalable, production-ready foundation with clear 
 - [Building the App](#building-the-app)
 - [Platform Permissions](#platform-permissions)
 - [Global Platform Error Boundary](#global-platform-error-boundary)
+- [Offline-First Sync Engine](#offline-first-sync-engine)
 - [Notes](#notes)
 
 ---
@@ -978,4 +979,164 @@ class MyPageView extends BasePage {
 | `nullError` | ✅ | Native side returned null unexpectedly |
 | `timeout` | ❌ | Native call exceeded the configured timeout |
 | `unknown` | ❌ | Any other unclassified native error |
+
+---
+
+## Offline-First Sync Engine
+
+The sync engine persists all local writes to an Isar **sync queue**, then automatically pushes them to the server whenever the device has connectivity — with retry, conflict resolution, and garbage collection built in.
+
+### Directory structure
+
+```
+lib/core/sync/
+├── domain/
+│   ├── enums/
+│   │   ├── sync_operation.dart       # create | update | delete
+│   │   └── sync_status.dart          # pending | inProgress | synced | failed | conflict
+│   └── conflict/
+│       ├── sync_conflict_resolver.dart     # Abstract strategy + ConflictResolution sealed class
+│       └── last_write_wins_resolver.dart   # Default: newer timestamp wins
+├── data/
+│   ├── models/
+│   │   └── sync_task_model.dart      # Isar @collection — one row per pending write
+│   └── datasources/
+│       └── sync_queue_local.dart     # SyncQueueLocal abstract + SyncQueueLocalImpl
+├── engine/
+│   ├── sync_adapter.dart             # SyncAdapter interface + SyncAdapterResult sealed class
+│   ├── sync_worker.dart              # Processes a single SyncTaskModel
+│   ├── sync_garbage_collector.dart   # Removes stale synced/failed tasks + deleted entities
+│   └── sync_engine.dart             # Main orchestrator (Provider, keep-alive)
+└── di/
+    └── sync_providers.dart           # All Riverpod providers for the sync subsystem
+
+lib/core/network/
+└── network_status_provider.dart      # StreamProvider<bool> — connectivity_plus, zero-polling
+
+lib/features/contacts/data/datasources/local/
+└── contact_sync_adapter.dart         # SyncAdapter for the contact entity type
+```
+
+### How it works
+
+```
+User write (offline)
+  │
+  └─▶ ContactLocalImpl.upsertContact(contact, enqueueSync: true)
+         │  Single Isar writeTxn
+         ├─ isar.contactModels.put(contact)      ← entity persisted
+         └─ isar.syncTaskModels.put(SyncTask)    ← queue entry (atomic!)
+
+isar.syncTaskModels.watchLazy()  ──emits──▶  SyncEngine._queueSub
+                                                  │  debounce 300 ms
+                                                  ▼
+networkStatusProvider (connectivity_plus)  ──▶  SyncEngine._networkSub
+                                                  │  on isOnline == true
+                                                  ▼
+                                         SyncEngine._drainQueue()
+                                           │  batch 50 tasks
+                                           ▼
+                                    SyncWorker.processTask(task)
+                                      ├─ mark inProgress
+                                      ├─ SyncAdapter.push(task)
+                                      │
+                                      ├─ SyncAdapterSuccess  → mark synced
+                                      ├─ SyncAdapterConflict → ConflictResolver.resolve()
+                                      │     ├─ KeepLocal  → re-queue pending
+                                      │     ├─ KeepServer → mark conflict (UI/apply server)
+                                      │     └─ MergeData  → re-queue with merged payload
+                                      ├─ SyncAdapterNetworkError → retry with back-off
+                                      └─ SyncAdapterFatalError   → mark failed
+
+SyncGarbageCollector (startup + every 24 h)
+  ├─ Delete SyncStatus.synced tasks older than 7 days
+  ├─ Delete SyncStatus.failed tasks older than 30 days
+  └─ Delete soft-deleted contacts (isSynced=true) older than 30 days
+```
+
+### `SyncTaskModel` fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `Id` | Isar auto-increment primary key |
+| `entityType` | `String` | e.g. `'contact'` — matches `SyncAdapter.entityType` |
+| `entityLocalId` | `String` | Local UUID of the entity |
+| `entityRemoteId` | `String?` | Server ID (null until first successful create) |
+| `operationIndex` | `int` | `SyncOperation` ordinal |
+| `statusIndex` | `int` | `SyncStatus` ordinal — indexed for fast pending queries |
+| `payload` | `String` | JSON snapshot captured **at enqueue time** |
+| `retryCount` | `int` | Number of push attempts made |
+| `maxRetries` | `int` | Threshold before marking failed (default 3) |
+| `createdAt` | `DateTime` | When the task was enqueued — indexed |
+| `lastAttemptAt` | `DateTime?` | Timestamp of the most recent attempt |
+| `errorMessage` | `String?` | Human-readable error from last failure |
+| `localVersion` | `String?` | Entity `updatedAt` at enqueue — used by conflict resolver |
+| `serverVersion` | `String?` | Last known server `updatedAt` — set after sync/conflict |
+
+### Conflict resolution
+
+The default strategy is **Last Write Wins** (`LastWriteWinsResolver`):
+- Compares `localVersion` vs `serverPayload['updatedAt']`
+- Server newer → `KeepServer` (mark conflict; apply server data locally)
+- Local newer or equal → `KeepLocal` (re-push local version to server)
+
+To swap strategies, replace the binding in `syncConflictResolverProvider`:
+
+```dart
+final syncConflictResolverProvider = Provider<SyncConflictResolver>((ref) {
+  return const MyCustomResolver(); // implements SyncConflictResolver
+});
+```
+
+### Enqueueing a local write (atomic)
+
+```dart
+// In a notifier or use case — passes enqueueSync: true for locally-originated writes
+await ref.read(contactLocalProvider).upsertContact(
+  contact,
+  enqueueSync: true,  // writes SyncTaskModel in same Isar transaction
+);
+
+// For soft-deletes
+await (ref.read(contactLocalProvider) as ContactLocalImpl)
+    .softDeleteContact(contact);
+```
+
+### Registering a new entity type
+
+1. Create `MyEntitySyncAdapter` implementing `SyncAdapter` with `entityType = 'my_entity'`
+2. Add it to `syncAdapterRegistryProvider`:
+
+```dart
+final syncAdapterRegistryProvider = Provider<Map<String, SyncAdapter>>((ref) {
+  return {
+    ContactSyncAdapter.type: const ContactSyncAdapter(),
+    MyEntitySyncAdapter.type: const MyEntitySyncAdapter(), // ← add here
+  };
+});
+```
+
+3. Enqueue tasks with `entityType = MyEntitySyncAdapter.type`
+
+### Performance & battery considerations
+
+| Mechanism | Benefit |
+|---|---|
+| `Isar.watchLazy()` | OS-level file notification — zero CPU polling |
+| `connectivity_plus` | OS-level reachability event — zero polling |
+| 300 ms debounce | Collapses rapid consecutive writes into one drain pass |
+| Batch size 50 | Limits memory per drain cycle |
+| `_isProcessing` guard | Prevents overlapping concurrent drain runs |
+| GC every 24 h | Frees disk space from stale queue rows |
+| `enqueueSync: false` (default) | Server-synced data does not re-enter the queue |
+
+### Setup — run after adding `SyncTaskModel`
+
+```bash
+# Install connectivity_plus (already added to pubspec.yaml)
+flutter pub get
+
+# Regenerate Isar schema for SyncTaskModel (replaces the manual .g.dart stub)
+dart run build_runner build --delete-conflicting-outputs
+```
 

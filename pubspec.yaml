@@ -29,6 +29,7 @@ environment:
 # versions available, run `flutter pub outdated`.
 dependencies:
   awesome_dio_interceptor: ^1.3.0
+  connectivity_plus: ^6.0.0
   cupertino_icons: ^1.0.8
   detect_proxy_setting: ^0.0.9
   dio: ^5.9.2

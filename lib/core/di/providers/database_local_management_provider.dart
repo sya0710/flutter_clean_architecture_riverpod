@@ -3,6 +3,7 @@ import 'dart:developer';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:isar_community/isar.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:riverpodlive/core/sync/data/models/sync_task_model.dart';
 import 'package:riverpodlive/features/contacts/data/models/contact_model.dart';
 
 class DatabaseLocalManagement {
@@ -10,7 +11,12 @@ class DatabaseLocalManagement {
 
   static final instance = DatabaseLocalManagement._();
 
-  static final List<CollectionSchema<dynamic>> _schemas = [ContactModelSchema];
+  /// All Isar collection schemas registered in the app.
+  /// Add new schemas here when creating new Isar collections.
+  static final List<CollectionSchema<dynamic>> _schemas = [
+    ContactModelSchema,
+    SyncTaskModelSchema, // offline sync queue
+  ];
 
   Isar? database;
 
