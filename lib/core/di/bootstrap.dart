@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:developer';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpodlive/core/di/providers/startup_provider.dart';
+import 'package:riverpodlive/firebase_options.dart';
 
 enum Flavor { dev, stg, production }
 
@@ -15,9 +17,7 @@ class _BootstrapPlaceholderApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(body: child),
-    );
+    return MaterialApp(home: Scaffold(body: child));
   }
 }
 
@@ -65,6 +65,9 @@ Future<void> bootstrap(
   };
 
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 2️⃣ Firebase – must be initialized before any Firebase service is used.
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // 3️⃣ UI system (status bar, orientation …)
   await SystemChrome.setEnabledSystemUIMode(

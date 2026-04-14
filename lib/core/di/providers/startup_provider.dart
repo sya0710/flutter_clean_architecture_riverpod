@@ -4,6 +4,7 @@ import 'package:riverpodlive/core/di/providers/dio_provider.dart';
 import 'package:riverpodlive/core/di/providers/log_management_provider.dart';
 import 'package:riverpodlive/core/di/providers/storage_management_provider.dart';
 import 'package:riverpodlive/core/helpers/utils.dart';
+import 'package:riverpodlive/core/remote_config/di/feature_flag_provider.dart';
 import 'package:riverpodlive/core/sync/di/sync_providers.dart';
 
 final startupProvider = FutureProvider<void>((ref) async {
@@ -16,4 +17,8 @@ final startupProvider = FutureProvider<void>((ref) async {
     // Boot the offline-first sync engine after the database is ready.
     // The engine is kept alive for the app's lifetime.
     ..read(syncEngineProvider);
+
+  // Fetch and activate Remote Config / feature flags early so they are
+  // available to the entire widget tree before the first frame renders.
+  await ref.read(featureFlagProvider.future);
 });
