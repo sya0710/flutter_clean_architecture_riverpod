@@ -8,6 +8,7 @@ Designed for teams that want a scalable, production-ready foundation with clear 
 
 ## Table of Contents
 
+- [Documentation](#documentation)
 - [Tech Stack](#tech-stack)
 - [Project Structure Overview](#project-structure-overview)
 - [Detailed File Descriptions](#detailed-file-descriptions)
@@ -29,6 +30,19 @@ Designed for teams that want a scalable, production-ready foundation with clear 
 - [Global Platform Error Boundary](#global-platform-error-boundary)
 - [Offline-First Sync Engine](#offline-first-sync-engine)
 - [Notes](#notes)
+
+---
+
+## Documentation
+
+Key guides are linked here so contributors can quickly find the middleware docs:
+
+- Navigation docs entry point: [`README_NAVIGATION.md`](README_NAVIGATION.md)
+- Middleware guide (full): [`MIDDLEWARE_GUIDE.md`](MIDDLEWARE_GUIDE.md)
+- Quick reference: [`QUICK_REFERENCE.md`](QUICK_REFERENCE.md)
+- Troubleshooting: [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)
+- Architecture diagram: [`ARCHITECTURE_DIAGRAM.md`](ARCHITECTURE_DIAGRAM.md)
+- Full docs index: [`DOCUMENTATION_INDEX.md`](DOCUMENTATION_INDEX.md)
 
 ---
 

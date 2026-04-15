@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:riverpodlive/core/config/router/navigation_service.dart';
+import 'package:riverpodlive/core/config/router/providers/navigation_provider.dart';
 import 'package:riverpodlive/core/config/router/router_path.dart';
 import 'package:riverpodlive/core/di/providers/storage_management_provider.dart';
 import 'package:riverpodlive/features/auth/presentation/pages/login_page.dart';
 import 'package:riverpodlive/features/main/presentation/pages/main_page.dart';
-
-class NavigationService {
-  static final GlobalKey<NavigatorState> navigatorKey =
-      GlobalKey<NavigatorState>();
-}
 
 /// Call [refresh()] after any auth-state change (login/logout)
 /// to make GoRouter re-evaluate the redirect.
@@ -33,15 +30,24 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final token = storage.accessToken.value;
       final hasToken = token.isNotEmpty;
-      final isOnLogin = state.matchedLocation == Routers.login.path;
+      final currentRoute = state.matchedLocation;
 
-      // No token → always send to login
-      if (!hasToken && !isOnLogin) return Routers.login.path;
+      // Read navigation service inside redirect to ensure it's properly typed
+      final navigationService = ref.read(navigationServiceProvider);
 
-      // Has token and trying to open login → send home
-      if (hasToken && isOnLogin) return Routers.home.path;
+      // Use middleware pipeline for navigation validation
+      final navigationResult = navigationService.validateNavigation(
+        toRoute: currentRoute,
+        fromRoute: null, // Can be enhanced to track previous route
+        hasToken: hasToken,
+        routerState: state,
+      );
 
-      return null; // no redirect
+      // Log the navigation decision for debugging
+      navigationService.logNavigation(navigationResult);
+
+      // Apply redirect if middleware determined one is needed
+      return navigationResult.redirectPath;
     },
     routes: [
       GoRoute(

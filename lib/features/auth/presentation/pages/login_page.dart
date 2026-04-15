@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:go_router/go_router.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:riverpodlive/core/config/lang/l10n/l10n.dart';
-import 'package:riverpodlive/core/config/router/router_path.dart';
 import 'package:riverpodlive/core/constants/app_colors_constants.dart';
 import 'package:riverpodlive/core/extensions/context_extension.dart';
 import 'package:riverpodlive/core/presentation/pages/base_page.dart';
@@ -33,9 +31,10 @@ class LoginPageView extends BasePage {
       // Only react to state changes triggered by the login action
       if (next.value?.action != AuthAction.login) return;
       next.whenOrNull(
-        data: (_) => context.go(Routers.home.path),
         error: (error, _) => showSnackBar(context, error.toString()),
       );
+      // Navigation is now handled by the middleware!
+      // No need for manual navigation to home page
     });
 
     return Scaffold(

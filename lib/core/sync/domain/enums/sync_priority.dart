@@ -4,9 +4,9 @@
 /// ascending priority order so that critical operations (e.g. payments) are
 /// pushed to the server before lower-priority ones (e.g. profile updates).
 ///
-/// ```
+///
 /// critical (0) → high (1) → normal (2) → low (3)
-/// ```
+///
 enum SyncPriority {
   /// Must be synced before everything else.
   /// Example: payment confirmations, order submissions.

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:riverpodlive/core/config/router/router.dart';
 import 'package:riverpodlive/core/di/providers/storage_management_provider.dart';
 import 'package:riverpodlive/core/extensions/result_extension.dart';
 import 'package:riverpodlive/features/auth/data/datasources/remotes/auth_remote_provider.dart';
@@ -35,6 +36,10 @@ class AuthNotifier extends _$AuthNotifier {
             apiResultMessage: message,
           ),
         );
+
+        // Trigger router refresh to re-evaluate redirects
+        // This will automatically navigate to home page via middleware
+        ref.read(goRouterRefreshNotifierProvider).refresh();
       },
       onError: (String? message, String? errorCode) {
         state = AsyncError<AuthState>(
@@ -43,5 +48,15 @@ class AuthNotifier extends _$AuthNotifier {
         );
       },
     );
+  }
+
+  Future<void> logout() async {
+    // Clear storage and authentication state
+    await ref.read(storageManagementProvider).clearDataWhenLogout();
+
+    state = const AsyncData(AuthState());
+
+    // Trigger router refresh to navigate to login page
+    ref.read(goRouterRefreshNotifierProvider).refresh();
   }
 }

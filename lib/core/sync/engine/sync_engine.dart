@@ -15,7 +15,7 @@ import 'package:riverpodlive/core/sync/engine/sync_worker.dart';
 /// - **Debounced**: rapid successive Isar writes
 /// collapse into a single drain pass.
 /// - **Concurrent-safe**: a boolean flag prevents overlapping drain runs.
-/// - **Back-pressure aware**: processes at most [_batchSize] tasks per cycle.
+/// - **Back-pressure aware**: processes tasks in bounded batches.
 /// - **Auto-GC**: runs [SyncGarbageCollector] at startup and every 24 hours.
 class SyncEngine {
   SyncEngine({
@@ -40,7 +40,6 @@ class SyncEngine {
   bool _isOnline = false;
   bool _isProcessing = false;
 
-  static const int _batchSize = 50;
   static const Duration _debounce = Duration(milliseconds: 300);
   static const Duration _gcInterval = Duration(hours: 24);
 
@@ -89,7 +88,7 @@ class SyncEngine {
     try {
       log('[SyncEngine] Draining queue…');
       while (_isOnline) {
-        final tasks = await _queue.getPending(limit: _batchSize);
+        final tasks = await _queue.getPending();
         if (tasks.isEmpty) break;
 
         log('[SyncEngine] Processing ${tasks.length} task(s)');
